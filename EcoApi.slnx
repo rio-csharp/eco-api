@@ -5,4 +5,10 @@
     <Project Path="src/EcoApi.Domain/EcoApi.Domain.csproj" />
     <Project Path="src/EcoApi.Infrastructure/EcoApi.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EcoApi.Api.IntegrationTests/EcoApi.Api.IntegrationTests.csproj" />
+    <Project Path="tests/EcoApi.Application.UnitTests/EcoApi.Application.UnitTests.csproj" />
+    <Project Path="tests/EcoApi.Domain.UnitTests/EcoApi.Domain.UnitTests.csproj" />
+    <Project Path="tests/EcoApi.Infrastructure.UnitTests/EcoApi.Infrastructure.UnitTests.csproj" />
+  </Folder>
 </Solution>
