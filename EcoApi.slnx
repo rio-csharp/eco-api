@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EcoApi.Api/EcoApi.Api.csproj" />
+    <Project Path="src/EcoApi.Application/EcoApi.Application.csproj" />
+    <Project Path="src/EcoApi.Domain/EcoApi.Domain.csproj" />
+    <Project Path="src/EcoApi.Infrastructure/EcoApi.Infrastructure.csproj" />
+  </Folder>
+</Solution>
