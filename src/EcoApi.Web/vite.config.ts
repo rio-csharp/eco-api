@@ -1,6 +1,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import fs from 'fs'
+import path from 'path'
+
+const certPath = path.resolve(__dirname, 'aspnetapp.pfx');
+const httpsConfig = fs.existsSync(certPath)
+  ? {
+      pfx: fs.readFileSync(certPath),
+      passphrase: 'crypticpassword',
+    }
+  : {};
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -37,4 +47,16 @@ export default defineConfig({
       }
     })
   ],
+  server: {
+    port: 7001,
+    strictPort: true,
+    https: httpsConfig,
+    proxy: {
+      '/api': {
+        target: 'https://localhost:5001',
+        changeOrigin: true,
+        secure: false
+      }
+    }
+  }
 })

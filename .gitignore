@@ -1,4 +1,4 @@
-# .gitignore for ASP.NET Core and React
+﻿# .gitignore for ASP.NET Core and React
 
 # --- Visual Studio / .NET Core ---
 bin/
@@ -52,3 +52,7 @@ yarn-error.log*
 *.suo
 *.user
 *.sln.docstates
+src/EcoApi.Web/aspnetapp.pfx
+
+
+publish/
