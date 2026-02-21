@@ -1,5 +1,4 @@
 using EcoApi.Domain.Common;
-using Xunit;
 
 namespace EcoApi.Domain.UnitTests.Common;
 
