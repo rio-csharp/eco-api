@@ -56,3 +56,7 @@ src/EcoApi.Web/aspnetapp.pfx
 
 
 publish/
+/src/EcoApi.Api/Logs
+/src/EcoApi.Api/ecoapi.db
+/src/EcoApi.Api/ecoapi.db-shm
+/src/EcoApi.Api/ecoapi.db-wal

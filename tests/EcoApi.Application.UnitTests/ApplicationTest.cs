@@ -1,5 +1,3 @@
-using Xunit;
-
 namespace EcoApi.Application.UnitTests;
 
 public class ApplicationTest
