@@ -33,7 +33,7 @@ public class WeatherForecastTests : IClassFixture<WebApplicationFactory<Program>
         var accessToken = registerPayload.RootElement.GetProperty("accessToken").GetString();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-        var response = await client.GetAsync("/weatherforecast");
+        var response = await client.GetAsync("/api/weatherforecast");
         response.EnsureSuccessStatusCode();
         Assert.Equal("application/json; charset=utf-8",
             response.Content.Headers.ContentType?.ToString());
