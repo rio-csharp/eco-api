@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace EcoApi.Api.Controllers;
 
 [ApiController]
-[Route("weatherforecast")]
+[Route("api/[controller]")]
 [Authorize]
 [EnableRateLimiting("api-read")]
 public class WeatherForecastController : ControllerBase

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace EcoApi.Infrastructure.Services;
@@ -13,15 +14,18 @@ namespace EcoApi.Infrastructure.Services;
 public class AuthService : IAuthService
 {
     private readonly IUserRepository _userRepository;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IConfiguration _configuration;
 
     public AuthService(
         IUserRepository userRepository,
+        IRefreshTokenRepository refreshTokenRepository,
         IPasswordHasher passwordHasher,
         IConfiguration configuration)
     {
         _userRepository = userRepository;
+        _refreshTokenRepository = refreshTokenRepository;
         _passwordHasher = passwordHasher;
         _configuration = configuration;
     }
@@ -42,8 +46,7 @@ public class AuthService : IAuthService
 
         await _userRepository.AddAsync(user);
 
-        var token = GenerateJwtToken(user);
-        return new AuthResponse(token, user.Username, user.Email);
+        return await CreateAuthResponseAsync(user);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
@@ -54,8 +57,28 @@ public class AuthService : IAuthService
             throw new InvalidCredentialsException();
         }
 
-        var token = GenerateJwtToken(user);
-        return new AuthResponse(token, user.Username, user.Email);
+        return await CreateAuthResponseAsync(user);
+    }
+
+    public async Task<AuthResponse> RefreshAsync(RefreshTokenRequest request)
+    {
+        var incomingTokenHash = ComputeTokenHash(request.RefreshToken);
+        var storedToken = await _refreshTokenRepository.GetActiveByTokenHashAsync(incomingTokenHash);
+
+        if (storedToken == null)
+        {
+            throw new InvalidCredentialsException();
+        }
+
+        var replacementToken = CreateRefreshToken(storedToken.UserId);
+        await _refreshTokenRepository.AddAsync(replacementToken.Entity);
+
+        storedToken.RevokedAt = DateTime.UtcNow;
+        storedToken.ReplacedByTokenId = replacementToken.Entity.Id;
+        await _refreshTokenRepository.UpdateAsync(storedToken);
+
+        var accessToken = GenerateJwtToken(storedToken.User);
+        return new AuthResponse(accessToken, replacementToken.PlainToken, storedToken.User.Username, storedToken.User.Email);
     }
 
     private string GenerateJwtToken(User user)
@@ -81,4 +104,42 @@ public class AuthService : IAuthService
         var token = tokenHandler.CreateToken(tokenDescriptor);
         return tokenHandler.WriteToken(token);
     }
+
+    private async Task<AuthResponse> CreateAuthResponseAsync(User user)
+    {
+        var accessToken = GenerateJwtToken(user);
+        var refreshToken = CreateRefreshToken(user.Id);
+        await _refreshTokenRepository.AddAsync(refreshToken.Entity);
+
+        return new AuthResponse(accessToken, refreshToken.PlainToken, user.Username, user.Email);
+    }
+
+    private IssuedRefreshToken CreateRefreshToken(int userId)
+    {
+        var refreshTokenValue = GenerateRefreshTokenValue();
+        var refreshTokenExpiryDays = int.TryParse(_configuration["JwtSettings:RefreshTokenExpiryDays"], out var days) ? days : 7;
+
+        var entity = new RefreshToken
+        {
+            UserId = userId,
+            TokenHash = ComputeTokenHash(refreshTokenValue),
+            ExpiresAt = DateTime.UtcNow.AddDays(refreshTokenExpiryDays)
+        };
+
+        return new IssuedRefreshToken(entity, refreshTokenValue);
+    }
+
+    private static string GenerateRefreshTokenValue()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(64);
+        return Convert.ToBase64String(bytes);
+    }
+
+    private static string ComputeTokenHash(string tokenValue)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(tokenValue));
+        return Convert.ToHexString(bytes);
+    }
+
+    private sealed record IssuedRefreshToken(RefreshToken Entity, string PlainToken);
 }
