@@ -4,6 +4,7 @@ using EcoApi.Application.DTOs.Auth;
 using EcoApi.Domain.Entities;
 using FluentAssertions;
 using EcoApi.Infrastructure.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
 using System.Security.Cryptography;
@@ -18,7 +19,10 @@ public class AuthServiceTests
     {
         var repo = Substitute.For<IUserRepository>();
         var refreshTokenRepo = Substitute.For<IRefreshTokenRepository>();
+        var auditRepo = Substitute.For<IAuthAuditRepository>();
         var hasher = Substitute.For<IPasswordHasher>();
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns(new DefaultHttpContext());
         repo.GetByEmailAsync(Arg.Any<string>()).Returns(Task.FromResult<User?>(null));
         hasher.Hash(Arg.Any<string>()).Returns("hashed-password");
 
@@ -31,7 +35,7 @@ public class AuthServiceTests
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings).Build();
 
-        var svc = new AuthService(repo, refreshTokenRepo, hasher, config);
+        var svc = new AuthService(repo, refreshTokenRepo, auditRepo, hasher, httpContextAccessor, config);
 
         var result = await svc.RegisterAsync(new RegisterRequest("user", "user@example.com", "Password123"));
 
@@ -40,6 +44,7 @@ public class AuthServiceTests
         result.Email.Should().Be("user@example.com");
         await repo.Received(1).AddAsync(Arg.Any<User>());
         await refreshTokenRepo.Received(1).AddAsync(Arg.Any<RefreshToken>());
+        await auditRepo.Received(1).AddAsync(Arg.Is<AuthAuditLog>(x => x.EventType == "register" && x.IsSuccess));
     }
 
     [Fact]
@@ -47,7 +52,10 @@ public class AuthServiceTests
     {
         var repo = Substitute.For<IUserRepository>();
         var refreshTokenRepo = Substitute.For<IRefreshTokenRepository>();
+        var auditRepo = Substitute.For<IAuthAuditRepository>();
         var hasher = Substitute.For<IPasswordHasher>();
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns(new DefaultHttpContext());
         var password = "Secret123";
         var passHash = "hashed-password";
         var user = new User { Username = "user", Email = "user@example.com", PasswordHash = passHash };
@@ -63,12 +71,13 @@ public class AuthServiceTests
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings).Build();
 
-        var svc = new AuthService(repo, refreshTokenRepo, hasher, config);
+        var svc = new AuthService(repo, refreshTokenRepo, auditRepo, hasher, httpContextAccessor, config);
 
         var result = await svc.LoginAsync(new LoginRequest("user@example.com", password));
 
         result.AccessToken.Should().NotBeNullOrEmpty();
         result.RefreshToken.Should().NotBeNullOrEmpty();
+        await auditRepo.Received(1).AddAsync(Arg.Is<AuthAuditLog>(x => x.EventType == "login" && x.IsSuccess));
     }
 
     [Fact]
@@ -76,11 +85,15 @@ public class AuthServiceTests
     {
         var repo = Substitute.For<IUserRepository>();
         var refreshTokenRepo = Substitute.For<IRefreshTokenRepository>();
+        var auditRepo = Substitute.For<IAuthAuditRepository>();
         var hasher = Substitute.For<IPasswordHasher>();
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns(new DefaultHttpContext());
         repo.GetByEmailAsync("x@x.com").Returns(Task.FromResult<User?>(null));
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { { "JwtSettings:Secret", "s" } }).Build();
-        var svc = new AuthService(repo, refreshTokenRepo, hasher, config);
+        var svc = new AuthService(repo, refreshTokenRepo, auditRepo, hasher, httpContextAccessor, config);
         await Assert.ThrowsAsync<InvalidCredentialsException>(() => svc.LoginAsync(new LoginRequest("x@x.com", "p")));
+        await auditRepo.Received(1).AddAsync(Arg.Is<AuthAuditLog>(x => x.EventType == "login" && !x.IsSuccess));
     }
 
     [Fact]
@@ -88,7 +101,10 @@ public class AuthServiceTests
     {
         var repo = Substitute.For<IUserRepository>();
         var refreshTokenRepo = Substitute.For<IRefreshTokenRepository>();
+        var auditRepo = Substitute.For<IAuthAuditRepository>();
         var hasher = Substitute.For<IPasswordHasher>();
+        var httpContextAccessor = Substitute.For<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext.Returns(new DefaultHttpContext());
         var user = new User { Id = 7, Username = "user", Email = "user@example.com", PasswordHash = "hash" };
         var plainRefreshToken = "refresh-token";
         var existingToken = new RefreshToken
@@ -113,7 +129,7 @@ public class AuthServiceTests
         };
         var config = new ConfigurationBuilder().AddInMemoryCollection(inMemorySettings).Build();
 
-        var svc = new AuthService(repo, refreshTokenRepo, hasher, config);
+        var svc = new AuthService(repo, refreshTokenRepo, auditRepo, hasher, httpContextAccessor, config);
 
         var result = await svc.RefreshAsync(new RefreshTokenRequest(plainRefreshToken));
 
@@ -123,6 +139,7 @@ public class AuthServiceTests
         existingToken.RevokedAt.Should().NotBeNull();
         existingToken.ReplacedByTokenId.Should().Be(99);
         await refreshTokenRepo.Received(1).UpdateAsync(existingToken);
+        await auditRepo.Received(1).AddAsync(Arg.Is<AuthAuditLog>(x => x.EventType == "refresh" && x.IsSuccess));
     }
 
     private static string ComputeTokenHash(string tokenValue)

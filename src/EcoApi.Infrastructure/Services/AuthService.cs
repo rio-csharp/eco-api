@@ -2,6 +2,7 @@ using EcoApi.Application.Common.Interfaces;
 using EcoApi.Application.Common.Exceptions;
 using EcoApi.Application.DTOs.Auth;
 using EcoApi.Domain.Entities;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -15,25 +16,34 @@ public class AuthService : IAuthService
 {
     private readonly IUserRepository _userRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IAuthAuditRepository _authAuditRepository;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IConfiguration _configuration;
 
     public AuthService(
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
+        IAuthAuditRepository authAuditRepository,
         IPasswordHasher passwordHasher,
+        IHttpContextAccessor httpContextAccessor,
         IConfiguration configuration)
     {
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
+        _authAuditRepository = authAuditRepository;
         _passwordHasher = passwordHasher;
+        _httpContextAccessor = httpContextAccessor;
         _configuration = configuration;
     }
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
     {
+        var clientIp = GetClientIp();
+
         if (await _userRepository.GetByEmailAsync(request.Email) != null)
         {
+            await WriteAuditAsync("register", null, request.Email, clientIp, isSuccess: false, "duplicate-email");
             throw new DuplicateUserException(request.Email);
         }
 
@@ -41,32 +51,39 @@ public class AuthService : IAuthService
         {
             Username = request.Username,
             Email = request.Email,
-            PasswordHash = _passwordHasher.Hash(request.Password)
+            PasswordHash = _passwordHasher.Hash(request.Password),
+            RegistrationIp = clientIp
         };
 
         await _userRepository.AddAsync(user);
+        await WriteAuditAsync("register", user.Id, user.Email, clientIp, isSuccess: true, null);
 
         return await CreateAuthResponseAsync(user);
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
+        var clientIp = GetClientIp();
         var user = await _userRepository.GetByEmailAsync(request.Email);
         if (user == null || !_passwordHasher.Verify(request.Password, user.PasswordHash))
         {
+            await WriteAuditAsync("login", user?.Id, request.Email, clientIp, isSuccess: false, "invalid-credentials");
             throw new InvalidCredentialsException();
         }
 
+        await WriteAuditAsync("login", user.Id, user.Email, clientIp, isSuccess: true, null);
         return await CreateAuthResponseAsync(user);
     }
 
     public async Task<AuthResponse> RefreshAsync(RefreshTokenRequest request)
     {
+        var clientIp = GetClientIp();
         var incomingTokenHash = ComputeTokenHash(request.RefreshToken);
         var storedToken = await _refreshTokenRepository.GetActiveByTokenHashAsync(incomingTokenHash);
 
         if (storedToken == null)
         {
+            await WriteAuditAsync("refresh", null, null, clientIp, isSuccess: false, "invalid-refresh-token");
             throw new InvalidCredentialsException();
         }
 
@@ -78,6 +95,7 @@ public class AuthService : IAuthService
         await _refreshTokenRepository.UpdateAsync(storedToken);
 
         var accessToken = GenerateJwtToken(storedToken.User);
+        await WriteAuditAsync("refresh", storedToken.User.Id, storedToken.User.Email, clientIp, isSuccess: true, null);
         return new AuthResponse(accessToken, replacementToken.PlainToken, storedToken.User.Username, storedToken.User.Email);
     }
 
@@ -139,6 +157,26 @@ public class AuthService : IAuthService
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(tokenValue));
         return Convert.ToHexString(bytes);
+    }
+
+    private string GetClientIp()
+    {
+        return _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString() ?? "unknown-client";
+    }
+
+    private Task WriteAuditAsync(string eventType, int? userId, string? email, string ipAddress, bool isSuccess, string? failureReason)
+    {
+        var auditLog = new AuthAuditLog
+        {
+            EventType = eventType,
+            UserId = userId,
+            Email = email,
+            IpAddress = ipAddress,
+            IsSuccess = isSuccess,
+            FailureReason = failureReason
+        };
+
+        return _authAuditRepository.AddAsync(auditLog);
     }
 
     private sealed record IssuedRefreshToken(RefreshToken Entity, string PlainToken);

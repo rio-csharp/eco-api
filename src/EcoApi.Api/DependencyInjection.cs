@@ -3,6 +3,7 @@ using EcoApi.Application;
 using EcoApi.Infrastructure;
 using EcoApi.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -28,6 +29,8 @@ public static class DependencyInjection
 
         services.AddApplication();
         services.AddInfrastructure(configuration);
+        services.AddHttpContextAccessor();
+        services.AddForwardedHeadersSupport();
 
         services.AddJwtAuthentication(configuration);
         services.AddAuthorization();
@@ -65,6 +68,7 @@ public static class DependencyInjection
     public static void UseApiPipeline(this WebApplication app)
     {
         app.UseExceptionHandler();
+        app.UseForwardedHeaders();
 
         if (app.Environment.IsDevelopment())
         {
@@ -116,29 +120,38 @@ public static class DependencyInjection
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            options.AddFixedWindowLimiter("auth-register", limiterOptions =>
-            {
-                limiterOptions.PermitLimit = 5;
-                limiterOptions.Window = TimeSpan.FromMinutes(1);
-                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                limiterOptions.QueueLimit = 0;
-            });
-
-            options.AddFixedWindowLimiter("auth-login", limiterOptions =>
-            {
-                limiterOptions.PermitLimit = 10;
-                limiterOptions.Window = TimeSpan.FromSeconds(10);
-                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                limiterOptions.QueueLimit = 2;
-            });
-
-            options.AddFixedWindowLimiter("api-read", limiterOptions =>
-            {
-                limiterOptions.PermitLimit = 60;
-                limiterOptions.Window = TimeSpan.FromMinutes(1);
-                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                limiterOptions.QueueLimit = 10;
-            });
+            options.AddPolicy("auth-register", context => CreateFixedWindowPolicy(context, permitLimit: 5, TimeSpan.FromMinutes(1), queueLimit: 0));
+            options.AddPolicy("auth-login", context => CreateFixedWindowPolicy(context, permitLimit: 10, TimeSpan.FromSeconds(10), queueLimit: 2));
+            options.AddPolicy("api-read", context => CreateFixedWindowPolicy(context, permitLimit: 60, TimeSpan.FromMinutes(1), queueLimit: 10));
         });
+    }
+
+    private static void AddForwardedHeadersSupport(this IServiceCollection services)
+    {
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.ForwardLimit = 1;
+            options.KnownIPNetworks.Clear();
+            options.KnownProxies.Clear();
+        });
+    }
+
+    private static RateLimitPartition<string> CreateFixedWindowPolicy(HttpContext context, int permitLimit, TimeSpan window, int queueLimit)
+    {
+        var partitionKey = GetClientIp(context);
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = permitLimit,
+            Window = window,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = queueLimit
+        });
+    }
+
+    private static string GetClientIp(HttpContext context)
+    {
+        return context.Connection.RemoteIpAddress?.ToString() ?? "unknown-client";
     }
 }
