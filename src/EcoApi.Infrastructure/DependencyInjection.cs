@@ -1,5 +1,4 @@
 using EcoApi.Application.Common.Interfaces;
-using EcoApi.Application.Interfaces;
 using EcoApi.Infrastructure.Persistence;
 using EcoApi.Infrastructure.Repositories;
 using EcoApi.Infrastructure.Services;
@@ -19,7 +18,6 @@ public static class DependencyInjection
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
-        services.AddTransient<IDateTime, DateTimeService>();
 
         return services;
     }

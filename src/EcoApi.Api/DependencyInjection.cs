@@ -16,7 +16,10 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
-        services.AddControllers();
+        services.AddControllers(options =>
+        {
+            options.Filters.Add<FluentValidationActionFilter>();
+        });
         services.AddEndpointsApiExplorer();
         services.AddOpenApi();
 
